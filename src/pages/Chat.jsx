@@ -96,21 +96,38 @@ export default function Chat() {
   };
 
   const makeWebPreview = (files) => {
-    const html = files["index.html"] || "<!doctype html><body><h1>Missing index.html</h1>";
-    const css = files["style.css"] || "";
-    const js = files["script.js"] || "";
+  let html = files["index.html"] || "<!doctype html><body><h1>Missing index.html</h1>";
+  const css = files["style.css"] || "";
+  const js = files["script.js"] || "";
 
-    let combined = html;
-    if (css) combined = combined.replace("</head>", `<style>${css}</style></head>`);
-    if (js) combined = combined.replace("</body>", `<script>${js}</script></body>`);
+  // Inject CSS
+  if (css && !html.includes("<style")) {
+    const styleTag = `<style>${css}</style>`;
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${styleTag}</head>`);
+    } else {
+      html = styleTag + html;
+    }
+  }
 
-    const blob = new Blob([combined], { type: "text/html" });
-    return URL.createObjectURL(blob);
-  };
+  // Inject JS
+  if (js && !html.includes("<script")) {
+    const scriptTag = `<script>${js}</script>`;
+    if (html.includes("</body>")) {
+      html = html.replace("</body>", `${scriptTag}</body>`);
+    } else {
+      html += scriptTag;
+    }
+  }
 
-  const handleCastSpell = async () => {
+  return URL.createObjectURL(new Blob([html], { type: "text/html" }));
+};
+
+
+        const handleCastSpell = async () => {
     if (!prompt.trim() || !active || isCasting) return;
 
+    // Set project title from first user message
     if (!active.messages.some(m => m.sender === "user")) {
       updateActive({ title: deriveTitle(prompt) });
     }
@@ -122,34 +139,57 @@ export default function Chat() {
     setDownloadUrl(null);
 
     try {
+      // 🖼 If it's an image request
       if (/(image|picture|draw|logo|icon|generate an image|create.*image)/i.test(currentPrompt)) {
-        const imageUrl = await requestImage(currentPrompt);
-        appendMessage({ sender: "ai", type: "image", content: imageUrl });
-      } else {
-        const result = await requestGenerate(currentPrompt, active.platform);
-        if (result.files && Object.keys(result.files).length > 0) {
-          setFiles(result.files);
-          if (active.platform === "web" && result.files["index.html"]) {
-            const previewUrl = makeWebPreview(result.files);
-            setPreviewUrl(previewUrl);
-          } else {
-            setPreviewUrl(null);
-          }
-          appendMessage({
-            sender: "ai",
-            text: result.summary || `✨ Generated ${active.platform} app.`,
-          });
-        } else {
-          appendMessage({ sender: "ai", text: "❌ No files generated." });
+        try {
+          const imageUrl = await requestImage(currentPrompt);
+          appendMessage({ sender: "ai", type: "image", content: imageUrl });
+        } catch (err) {
+          console.error("Image generation error:", err);
+          appendMessage({ sender: "ai", text: `❌ Image generation failed: ${err.message}` });
         }
+        return; // stop here if it's an image
+      }
+
+      // 💻 Otherwise: generate code for selected platform
+      const result = await requestGenerate(currentPrompt, active.platform);
+
+      if (result.files && Object.keys(result.files).length > 0) {
+        // 🧹 Clean up markdown fences
+        const cleanedFiles = {};
+        for (const [name, content] of Object.entries(result.files)) {
+          cleanedFiles[name] = content
+            .replace(/```[a-zA-Z]*\n?/g, "") // remove ```html, ```css etc
+            .replace(/```/g, "")             // remove closing ```
+            .trim();
+        }
+
+        setFiles(cleanedFiles);
+
+        // 🌐 Build live preview for web platform
+        if (active.platform === "web" && cleanedFiles["index.html"]) {
+          const previewUrl = makeWebPreview(cleanedFiles);
+          setPreviewUrl(previewUrl);
+        } else {
+          setPreviewUrl(null);
+        }
+
+        appendMessage({
+          sender: "ai",
+          text: result.summary || `✨ Generated ${active.platform} app.`
+        });
+      } else {
+        appendMessage({ sender: "ai", text: "❌ No files generated." });
       }
     } catch (error) {
-      console.error("Cast error:", error);
-      appendMessage({ sender: "ai", text: `❌ Failed: ${error.message}` });
+      console.error("Cast spell error:", error);
+      appendMessage({ sender: "ai", text: "❌ Code generation failed." });
     } finally {
       setIsCasting(false);
     }
   };
+
+
 
   const handleBuild = async () => {
     if (!active?.files || Object.keys(active.files).length === 0) {
@@ -266,9 +306,20 @@ export default function Chat() {
             <Download className="w-4 h-4 mr-1" /> {isBuilding ? "Building..." : "Build App"}
           </Button>
           {active.downloadUrl && (
-            <a href={active.downloadUrl} className="bg-green-600 px-3 py-1 rounded ml-2" download>
+            <Button
+              onClick={() => {
+                const link = document.createElement("a");
+                link.href = active.downloadUrl;
+                link.download = ""; // forces download
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }}
+              className="ml-2 bg-green-600 px-3 py-1 rounded text-sm"
+            >
               Download
-            </a>
+            </Button>
+
           )}
         </div>
 
@@ -285,7 +336,11 @@ export default function Chat() {
           )}
           <div className="flex-1 p-3">
             {active.previewUrl && (
-              <iframe src={active.previewUrl} className="w-full h-full rounded border border-slate-700" />
+              <iframe
+                src={active.previewUrl}
+                className="w-full h-full border-none"
+                title="App Preview"
+              />
             )}
           </div>
         </div>
