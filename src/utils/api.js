@@ -1,5 +1,5 @@
 const API_BASE =
-  import.meta.env.VITE_API_BASE || "https://api.wandalf.com";
+  import.meta.env.VITE_API_BASE || "";
 
 export async function requestImage(prompt) {
   const res = await fetch(`${API_BASE}/api/image`, {
