@@ -2,7 +2,7 @@ export const User = {
   me: async () => {
     return {
       full_name: "Samat",
-      email: "samat@example.com",
+      email: "",
       avatar_url: null,
     };
   },
